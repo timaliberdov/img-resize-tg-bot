@@ -1,13 +1,14 @@
 #[macro_use]
 extern crate smart_default;
 
+use crate::commands::Command;
+use crate::dialogue::Dialogue;
+use std::convert::Infallible;
 use teloxide::prelude::*;
+use teloxide::types::BotCommand;
 
-#[derive(SmartDefault)]
-pub enum Dialogue {
-    #[default]
-    Start,
-}
+mod commands;
+mod dialogue;
 
 #[tokio::main]
 async fn main() {
@@ -18,25 +19,27 @@ async fn run() {
     teloxide::enable_logging!();
     let bot = Bot::from_env();
 
-    teloxide::dialogues_repl(bot, |message, dialogue| async move {
-        match handle_message(message, dialogue).await {
-            Err(e) => {
-                log::error!("Error in handle_message: {}", e);
-                DialogueStage::Exit
+    let commands: Vec<BotCommand> = Command::values();
+    if let Some(e) = bot.set_my_commands(commands).send().await.err() {
+        log::error!("Error in set_my_commands: {}", e);
+    }
+
+    Dispatcher::new(bot)
+        .messages_handler(DialogueDispatcher::new(|cx| async move {
+            match handle_message(cx).await {
+                Err(e) => {
+                    log::error!("Error in handle_message: {}", e);
+                    DialogueStage::Exit
+                }
+                Ok(res) => res,
             }
-            Ok(res) => res,
-        }
-    })
-    .await;
+        }))
+        .dispatch()
+        .await;
 }
 
-async fn handle_message(cx: UpdateWithCx<Message>, dialogue: Dialogue) -> TransitionOut<Dialogue> {
-    match dialogue {
-        Dialogue::Start => {
-            // todo
-            log::info!("Chat id: {}", cx.chat_id());
-            cx.answer_dice().send().await?;
-            exit()
-        }
-    }
+async fn handle_message(
+    cx: DialogueWithCx<Message, Dialogue, Infallible>,
+) -> ResponseResult<DialogueStage<Dialogue>> {
+    cx.dialogue.expect("Infallible").react(cx.cx, ()).await
 }

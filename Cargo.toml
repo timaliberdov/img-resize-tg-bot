@@ -13,6 +13,12 @@ pretty_env_logger = "0.4.0"
 teloxide = "0.3.1"
 teloxide-macros = "0.3.2"
 
+futures = "0.3.5"
 tokio = { version = "0.2.22", features = ["rt-threaded", "macros"] }
 
 smart-default = "0.6.0"
+derive_more = "0.99.9"
+
+image = "0.23.8"
+
+tempfile = "3.1.0"
