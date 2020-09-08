@@ -661,15 +661,13 @@ dependencies = [
 name = "img-resize-tg-bot"
 version = "0.1.0"
 dependencies = [
- "derive_more",
  "futures",
  "image",
  "log",
  "pretty_env_logger",
+ "reqwest",
  "serde_json",
- "smart-default",
  "teloxide",
- "teloxide-macros",
  "tempfile",
  "tokio",
  "warp",
@@ -1523,17 +1521,6 @@ name = "slab"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c111b5bd5695e56cffe5129854aa230b39c93a305372fdbb2668ca2394eea9f8"
-
-[[package]]
-name = "smart-default"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "133659a15339456eeeb07572eb02a91c91e9815e9cbc89566944d2c8d3efdbf6"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
 
 [[package]]
 name = "socket2"

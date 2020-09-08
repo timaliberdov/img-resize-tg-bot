@@ -1,14 +1,13 @@
 use std::{convert::Infallible, net::SocketAddr};
+
+use reqwest::StatusCode;
 use teloxide::Bot;
+use teloxide::{dispatching::update_listeners::UpdateListener, prelude::*};
 use tokio::sync::mpsc;
 use warp::Filter;
 
 use crate::env::get_env;
-use teloxide::{dispatching::update_listeners, prelude::*};
-use update_listeners::UpdateListener;
-use warp::http::StatusCode;
 
-const TELOXIDE_TOKEN_ENV: &str = "TELOXIDE_TOKEN";
 const WEBHOOK_HOST_ENV: &str = "WEBHOOK_HOST";
 const WEBHOOK_PORT_ENV: &str = "PORT";
 
@@ -17,14 +16,13 @@ async fn handle_rejection(error: warp::Rejection) -> Result<impl warp::Reply, In
     Ok(StatusCode::INTERNAL_SERVER_ERROR)
 }
 
-pub async fn start_webhook(bot: Bot) -> impl UpdateListener<serde_json::Error> {
+pub async fn start_webhook(bot: Bot) -> impl UpdateListener<Infallible> {
     let host = get_env(WEBHOOK_HOST_ENV);
     let port: u16 = get_env(WEBHOOK_PORT_ENV)
         .parse()
         .expect("Port value should be integer");
-    let token = get_env(TELOXIDE_TOKEN_ENV);
-
-    let url = format!("https://{}/{}", host, token);
+    let path = format!("bot{}", bot.token());
+    let url = format!("https://{}/{}", host, path);
 
     bot.set_webhook(url)
         .send()
@@ -34,7 +32,7 @@ pub async fn start_webhook(bot: Bot) -> impl UpdateListener<serde_json::Error> {
     let (sender, receiver) = mpsc::unbounded_channel();
 
     let server = warp::post()
-        .and(warp::path(token))
+        .and(warp::path(path))
         .and(warp::body::json())
         .map(move |json: serde_json::Value| {
             let try_parse = match serde_json::from_str(&json.to_string()) {
@@ -50,9 +48,9 @@ pub async fn start_webhook(bot: Bot) -> impl UpdateListener<serde_json::Error> {
                 }
             };
 
-            if try_parse.is_ok() {
+            if let Ok(update) = try_parse {
                 sender
-                    .send(try_parse)
+                    .send(Ok(update))
                     .expect("Could not send an incoming update from the webhook")
             }
 
@@ -61,7 +59,6 @@ pub async fn start_webhook(bot: Bot) -> impl UpdateListener<serde_json::Error> {
         .recover(handle_rejection);
 
     let serve = warp::serve(server);
-
     let address = format!("0.0.0.0:{}", port);
     tokio::spawn(serve.run(address.parse::<SocketAddr>().unwrap()));
     receiver

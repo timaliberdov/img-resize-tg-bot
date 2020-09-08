@@ -9,18 +9,11 @@ edition = "2018"
 [dependencies]
 log = "0.4.11"
 pretty_env_logger = "0.4.0"
-
 teloxide = "0.3.1"
-teloxide-macros = "0.3.2"
-
 futures = "0.3.5"
 tokio = { version = "0.2.22", features = ["rt-threaded", "macros"] }
 warp = "0.2.5"
 serde_json = "1.0.57"
-
-smart-default = "0.6.0"
-derive_more = "0.99.9"
-
+reqwest = "0.10.8"
 image = "0.23.8"
-
 tempfile = "3.1.0"

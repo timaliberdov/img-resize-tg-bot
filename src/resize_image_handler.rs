@@ -8,11 +8,8 @@ use teloxide::requests::RequestWithFile;
 use teloxide::types::{
     Document, InputFile, MediaDocument, MediaKind, MediaPhoto, MessageCommon, MessageKind,
 };
-use teloxide_macros::teloxide;
 use tempfile::NamedTempFile;
 use tokio::fs::OpenOptions;
-
-use crate::dialogue::Dialogue;
 
 const START_COMMAND: &str = "/start";
 const HELP_COMMAND: &str = "/help";
@@ -27,14 +24,7 @@ const HELP_MESSAGE: &str = "Hello, I'm the Resize Image Bot! \
 const MAX_IMAGE_SIZE: u32 = 512;
 const PNG_EXTENSION: &str = ".png";
 
-#[derive(Default)]
-pub struct ResizeImageTgStickerState;
-
-#[teloxide(subtransition)]
-async fn resize_image_tg_sticker(
-    state: ResizeImageTgStickerState,
-    cx: TransitionIn,
-) -> TransitionOut<Dialogue> {
+pub async fn handle_message(cx: UpdateWithCx<Message>) {
     match &cx.update.kind {
         MessageKind::Common(MessageCommon {
             media_kind: MediaKind::Photo(MediaPhoto { photo: photos, .. }),
@@ -49,7 +39,7 @@ async fn resize_image_tg_sticker(
             .and_then(|file_id| resize_and_answer(&cx, file_id))
             .await;
 
-            handle_result(state, &cx, result).await
+            handle_result(&cx, result).await
         }
         MessageKind::Common(MessageCommon {
             media_kind:
@@ -60,22 +50,20 @@ async fn resize_image_tg_sticker(
             ..
         }) => {
             let result = resize_and_answer(&cx, file_id).await;
-            handle_result(state, &cx, result).await
+            handle_result(&cx, result).await
         }
-        _ => {
-            match cx.update.text() {
-                Some(START_COMMAND) | Some(HELP_COMMAND) => {
-                    cx.answer_str(HELP_MESSAGE).await?;
-                }
-                _ => {
-                    cx.answer_str("Expected image or file containing image.")
-                        .await?;
-                }
+        _ => match cx.update.text() {
+            Some(START_COMMAND) | Some(HELP_COMMAND) => {
+                cx.answer_str(HELP_MESSAGE).await.log_on_error().await;
             }
-
-            next(state)
-        }
-    }
+            _ => {
+                cx.answer_str("Expected image or file containing image.")
+                    .await
+                    .log_on_error()
+                    .await;
+            }
+        },
+    };
 }
 
 #[derive(Debug)]
@@ -87,23 +75,17 @@ enum Error {
     PhotosAbsent,
 }
 
-async fn handle_result(
-    state: ResizeImageTgStickerState,
-    cx: &TransitionIn,
-    result: Result<(), Error>,
-) -> TransitionOut<Dialogue> {
-    match result {
-        Err(Error::TeloxideRequest(e)) => Err(e),
-        Err(e) => {
-            log::error!("{:?}", e);
-            cx.answer_str("Couldn't process image.").await?;
-            next(state)
-        }
-        Ok(_) => next(state),
+async fn handle_result(cx: &UpdateWithCx<Message>, result: Result<(), Error>) {
+    if let Err(e) = result {
+        log::error!("Error in handle_message: {:?}", e);
+        cx.answer_str("Couldn't process image.")
+            .await
+            .log_on_error()
+            .await;
     }
 }
 
-async fn resize_and_answer(cx: &TransitionIn, file_id: &str) -> Result<(), Error> {
+async fn resize_and_answer(cx: &UpdateWithCx<Message>, file_id: &str) -> Result<(), Error> {
     let tg_file_path = get_tg_file_path(&cx, file_id).await?;
     let tmp_file = create_tmp_file(PNG_EXTENSION)?;
     let tmp_file_path = tmp_file.path();
@@ -124,7 +106,7 @@ async fn resize_and_answer(cx: &TransitionIn, file_id: &str) -> Result<(), Error
     Ok(())
 }
 
-async fn get_tg_file_path(cx: &TransitionIn, file_id: &str) -> Result<String, Error> {
+async fn get_tg_file_path(cx: &UpdateWithCx<Message>, file_id: &str) -> Result<String, Error> {
     cx.bot
         .get_file(file_id)
         .send()
@@ -141,7 +123,7 @@ fn create_tmp_file(extension: &str) -> Result<NamedTempFile, Error> {
 }
 
 async fn download_file<P>(
-    cx: &TransitionIn,
+    cx: &UpdateWithCx<Message>,
     tmp_file_path: P,
     tg_file_path: &str,
 ) -> Result<(), Error>
