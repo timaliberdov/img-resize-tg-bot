@@ -5,7 +5,9 @@ use image::imageops::FilterType;
 use image::{DynamicImage, ImageFormat};
 use teloxide::prelude::*;
 use teloxide::requests::RequestWithFile;
-use teloxide::types::{InputFile, MediaKind, MediaPhoto, MessageCommon, MessageKind};
+use teloxide::types::{
+    Document, InputFile, MediaDocument, MediaKind, MediaPhoto, MessageCommon, MessageKind,
+};
 use teloxide_macros::teloxide;
 use tempfile::NamedTempFile;
 use tokio::fs::OpenOptions;
@@ -34,15 +36,18 @@ async fn resize_image_tg_sticker(
             .and_then(|file_id| resize_and_answer(&cx, file_id))
             .await;
 
-            match result {
-                Err(Error::TeloxideRequest(e)) => Err(e),
-                Err(e) => {
-                    log::error!("{:?}", e);
-                    cx.answer_str("Couldn't process image.").await?;
-                    next(state)
-                }
-                Ok(_) => next(state),
-            }
+            handle_result(state, &cx, result).await
+        }
+        MessageKind::Common(MessageCommon {
+            media_kind:
+                MediaKind::Document(MediaDocument {
+                    document: Document { file_id, .. },
+                    ..
+                }),
+            ..
+        }) => {
+            let result = resize_and_answer(&cx, file_id).await;
+            handle_result(state, &cx, result).await
         }
         _ => {
             cx.answer_str("Expected image or file containing image.")
@@ -63,6 +68,22 @@ enum Error {
 
 const MAX_IMAGE_SIZE: u32 = 512;
 const PNG_EXTENSION: &str = ".png";
+
+async fn handle_result(
+    state: ResizeImageTgStickerState,
+    cx: &TransitionIn,
+    result: Result<(), Error>,
+) -> TransitionOut<Dialogue> {
+    match result {
+        Err(Error::TeloxideRequest(e)) => Err(e),
+        Err(e) => {
+            log::error!("{:?}", e);
+            cx.answer_str("Couldn't process image.").await?;
+            next(state)
+        }
+        Ok(_) => next(state),
+    }
+}
 
 async fn resize_and_answer(cx: &TransitionIn, file_id: &str) -> Result<(), Error> {
     let tg_file_path = get_tg_file_path(&cx, file_id).await?;
