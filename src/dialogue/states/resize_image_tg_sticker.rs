@@ -1,40 +1,55 @@
 use std::path::Path;
 
+use futures::{future, TryFutureExt};
 use image::imageops::FilterType;
 use image::{DynamicImage, ImageFormat};
 use teloxide::prelude::*;
 use teloxide::requests::RequestWithFile;
-use teloxide::types::{InputFile, MediaKind, MediaPhoto, MessageCommon, MessageKind, PhotoSize};
+use teloxide::types::{InputFile, MediaKind, MediaPhoto, MessageCommon, MessageKind};
 use teloxide_macros::teloxide;
+use tempfile::NamedTempFile;
 use tokio::fs::OpenOptions;
 
-use crate::dialogue::{states::main::MainState, Dialogue};
-use tempfile::NamedTempFile;
+use crate::dialogue::Dialogue;
 
-pub struct ReceiveImageTgStickerState;
+#[derive(Default)]
+pub struct ResizeImageTgStickerState;
 
 #[teloxide(subtransition)]
-async fn receive_image_tg_sticker(
-    state: ReceiveImageTgStickerState,
+async fn resize_image_tg_sticker(
+    state: ResizeImageTgStickerState,
     cx: TransitionIn,
 ) -> TransitionOut<Dialogue> {
-    if let MessageKind::Common(MessageCommon {
-        // todo: handle attached files
-        media_kind: MediaKind::Photo(MediaPhoto { photo: photos, .. }),
-        ..
-    }) = &cx.update.kind
-    {
-        // todo: handle media groups for batch resizing (seems like every file in group is in separate message)
-        if let Some(PhotoSize { file_id, .. }) = photos.first() {
-            match resize_and_answer(&cx, file_id).await {
-                Err(Error::TeloxideRequest(e)) => return Err(e),
-                Err(e) => log::error!("{:?}", e),
-                Ok(_) => {}
+    match &cx.update.kind {
+        MessageKind::Common(MessageCommon {
+            media_kind: MediaKind::Photo(MediaPhoto { photo: photos, .. }),
+            ..
+        }) => {
+            let result = future::ready(
+                photos
+                    .first()
+                    .ok_or(Error::PhotosAbsent)
+                    .map(|ps| &ps.file_id),
+            )
+            .and_then(|file_id| resize_and_answer(&cx, file_id))
+            .await;
+
+            match result {
+                Err(Error::TeloxideRequest(e)) => Err(e),
+                Err(e) => {
+                    log::error!("{:?}", e);
+                    cx.answer_str("Couldn't process image.").await?;
+                    next(state)
+                }
+                Ok(_) => next(state),
             }
-            return next(MainState);
+        }
+        _ => {
+            cx.answer_str("Expected image or file containing image.")
+                .await?;
+            next(state)
         }
     }
-    next(state)
 }
 
 #[derive(Debug)]
@@ -43,10 +58,11 @@ enum Error {
     Io(std::io::Error),
     TeloxideRequest(teloxide::RequestError),
     TeloxideDownload(teloxide::DownloadError),
+    PhotosAbsent,
 }
 
 const MAX_IMAGE_SIZE: u32 = 512;
-const PNG_EXTENSION: &'static str = ".png";
+const PNG_EXTENSION: &str = ".png";
 
 async fn resize_and_answer(cx: &TransitionIn, file_id: &str) -> Result<(), Error> {
     let tg_file_path = get_tg_file_path(&cx, file_id).await?;

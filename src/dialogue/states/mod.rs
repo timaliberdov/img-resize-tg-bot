@@ -1,5 +1,3 @@
-mod main;
-mod receive_image_tg_sticker;
+mod resize_image_tg_sticker;
 
-pub use main::MainState;
-pub use receive_image_tg_sticker::ReceiveImageTgStickerState;
+pub use resize_image_tg_sticker::ResizeImageTgStickerState;

@@ -1,13 +1,12 @@
 #[macro_use]
 extern crate smart_default;
 
-use crate::commands::Command;
-use crate::dialogue::Dialogue;
 use std::convert::Infallible;
-use teloxide::prelude::*;
-use teloxide::types::BotCommand;
 
-mod commands;
+use teloxide::prelude::*;
+
+use crate::dialogue::Dialogue;
+
 mod dialogue;
 
 #[tokio::main]
@@ -18,11 +17,6 @@ async fn main() {
 async fn run() {
     teloxide::enable_logging!();
     let bot = Bot::from_env();
-
-    let commands: Vec<BotCommand> = Command::values();
-    if let Some(e) = bot.set_my_commands(commands).send().await.err() {
-        log::error!("Error in set_my_commands: {}", e);
-    }
 
     Dispatcher::new(bot)
         .messages_handler(DialogueDispatcher::new(|cx| async move {
