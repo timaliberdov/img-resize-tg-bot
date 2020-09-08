@@ -9,8 +9,8 @@ use update_listeners::UpdateListener;
 use warp::http::StatusCode;
 
 const TELOXIDE_TOKEN_ENV: &str = "TELOXIDE_TOKEN";
-const WEBHOOK_HOST_ENV: &str = "WEBHOOK_HOST_ENV";
-const WEBHOOK_PORT_ENV: &str = "WEBHOOK_PORT_ENV";
+const WEBHOOK_HOST_ENV: &str = "WEBHOOK_HOST";
+const WEBHOOK_PORT_ENV: &str = "PORT";
 
 async fn handle_rejection(error: warp::Rejection) -> Result<impl warp::Reply, Infallible> {
     log::error!("Could not process the request due to: {:?}", error);
