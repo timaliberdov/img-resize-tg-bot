@@ -14,6 +14,19 @@ use tokio::fs::OpenOptions;
 
 use crate::dialogue::Dialogue;
 
+const START_COMMAND: &str = "/start";
+const HELP_COMMAND: &str = "/help";
+
+const HELP_MESSAGE: &str = "Hello, I'm the Resize Image Bot! \
+                            If you send me an image or an image file, \
+                            I can resize it to fit in a 512x512 square, \
+                            and send you back the file in PNG format. \
+                            \n\nThe result can be sent to the @Stickers bot to \
+                            add a new sticker to your sticker pack!";
+
+const MAX_IMAGE_SIZE: u32 = 512;
+const PNG_EXTENSION: &str = ".png";
+
 #[derive(Default)]
 pub struct ResizeImageTgStickerState;
 
@@ -50,8 +63,16 @@ async fn resize_image_tg_sticker(
             handle_result(state, &cx, result).await
         }
         _ => {
-            cx.answer_str("Expected image or file containing image.")
-                .await?;
+            match cx.update.text() {
+                Some(START_COMMAND) | Some(HELP_COMMAND) => {
+                    cx.answer_str(HELP_MESSAGE).await?;
+                }
+                _ => {
+                    cx.answer_str("Expected image or file containing image.")
+                        .await?;
+                }
+            }
+
             next(state)
         }
     }
@@ -65,9 +86,6 @@ enum Error {
     TeloxideDownload(teloxide::DownloadError),
     PhotosAbsent,
 }
-
-const MAX_IMAGE_SIZE: u32 = 512;
-const PNG_EXTENSION: &str = ".png";
 
 async fn handle_result(
     state: ResizeImageTgStickerState,
