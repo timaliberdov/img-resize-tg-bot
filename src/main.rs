@@ -8,6 +8,10 @@ use teloxide::prelude::*;
 use crate::dialogue::Dialogue;
 
 mod dialogue;
+mod env;
+mod webhook;
+
+const BOT_USE_POLLING_ENV: &str = "BOT_USE_POLLING";
 
 #[tokio::main]
 async fn main() {
@@ -16,10 +20,14 @@ async fn main() {
 
 async fn run() {
     teloxide::enable_logging!();
+    let use_polling: bool = env::get_env_opt(BOT_USE_POLLING_ENV)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(true);
+
     let bot = Bot::from_env();
 
-    Dispatcher::new(bot)
-        .messages_handler(DialogueDispatcher::new(|cx| async move {
+    let dispatcher =
+        Dispatcher::new(bot.clone()).messages_handler(DialogueDispatcher::new(|cx| async move {
             match handle_message(cx).await {
                 Err(e) => {
                     log::error!("Error in handle_message: {}", e);
@@ -27,9 +35,18 @@ async fn run() {
                 }
                 Ok(res) => res,
             }
-        }))
-        .dispatch()
-        .await;
+        }));
+
+    if use_polling {
+        dispatcher.dispatch().await;
+    } else {
+        dispatcher
+            .dispatch_with_listener(
+                webhook::start_webhook(bot.clone()).await,
+                LoggingErrorHandler::with_custom_text("An error from the update listener"),
+            )
+            .await;
+    }
 }
 
 async fn handle_message(
