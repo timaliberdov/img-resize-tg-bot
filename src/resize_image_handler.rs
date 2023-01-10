@@ -1,69 +1,50 @@
 use std::path::Path;
 
 use futures::{future, TryFutureExt};
-use image::imageops::FilterType;
-use image::{DynamicImage, ImageFormat};
-use teloxide::prelude::*;
-use teloxide::requests::RequestWithFile;
-use teloxide::types::{
-    Document, InputFile, MediaDocument, MediaKind, MediaPhoto, MessageCommon, MessageKind,
+use image::{imageops::FilterType, DynamicImage, ImageFormat};
+use teloxide::{
+    net::Download,
+    prelude::*,
+    types::{Document, FileMeta, InputFile, PhotoSize},
 };
 use tempfile::NamedTempFile;
 use tokio::fs::OpenOptions;
 
-const START_COMMAND: &str = "/start";
-const HELP_COMMAND: &str = "/help";
-
-const HELP_MESSAGE: &str = "Hello, I'm the Resize Image Bot! \
-                            If you send me an image or an image file, \
-                            I can resize it to fit in a 512x512 square, \
-                            and send you back the file in PNG format. \
-                            \n\nThe result can be sent to the @Stickers bot to \
-                            add a new sticker to your sticker pack!";
-
 const MAX_IMAGE_SIZE: u32 = 512;
 const PNG_EXTENSION: &str = ".png";
 
-pub async fn handle_message(cx: UpdateWithCx<Message>) {
-    match &cx.update.kind {
-        MessageKind::Common(MessageCommon {
-            media_kind: MediaKind::Photo(MediaPhoto { photo: photos, .. }),
-            ..
-        }) => {
-            let result = future::ready(
-                photos
-                    .first()
-                    .ok_or(Error::PhotosAbsent)
-                    .map(|ps| &ps.file_id),
-            )
-            .and_then(|file_id| resize_and_answer(&cx, file_id))
-            .await;
+pub async fn handle_photo(
+    bot: Bot,
+    msg: Message,
+    photos: Vec<PhotoSize>,
+) -> Result<(), teloxide::RequestError> {
+    let mut sorted_photos = photos;
+    sorted_photos.sort_by_key(|ps| std::cmp::Reverse(ps.width));
 
-            handle_result(&cx, result).await
-        }
-        MessageKind::Common(MessageCommon {
-            media_kind:
-                MediaKind::Document(MediaDocument {
-                    document: Document { file_id, .. },
-                    ..
-                }),
-            ..
-        }) => {
-            let result = resize_and_answer(&cx, file_id).await;
-            handle_result(&cx, result).await
-        }
-        _ => match cx.update.text() {
-            Some(START_COMMAND) | Some(HELP_COMMAND) => {
-                cx.answer_str(HELP_MESSAGE).await.log_on_error().await;
-            }
-            _ => {
-                cx.answer_str("Expected image or file containing image.")
-                    .await
-                    .log_on_error()
-                    .await;
-            }
-        },
-    };
+    let result = future::ready(
+        sorted_photos
+            .first()
+            .ok_or(Error::PhotosAbsent)
+            .map(|ps| &ps.file),
+    )
+    .and_then(|file| resize_and_answer(&bot, &msg, file))
+    .await;
+
+    handle_result(&bot, &msg, result).await;
+
+    Ok(())
+}
+
+pub async fn handle_document(
+    bot: Bot,
+    msg: Message,
+    document: Document,
+) -> Result<(), teloxide::RequestError> {
+    let result = resize_and_answer(&bot, &msg, &document.file).await;
+
+    handle_result(&bot, &msg, result).await;
+
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -75,43 +56,39 @@ enum Error {
     PhotosAbsent,
 }
 
-async fn handle_result(cx: &UpdateWithCx<Message>, result: Result<(), Error>) {
+async fn handle_result(bot: &Bot, msg: &Message, result: Result<(), Error>) {
     if let Err(e) = result {
         log::error!("Error in handle_message: {:?}", e);
-        cx.answer_str("Couldn't process image.")
+        bot.send_message(msg.chat.id, "Couldn't process image.")
             .await
             .log_on_error()
             .await;
     }
 }
 
-async fn resize_and_answer(cx: &UpdateWithCx<Message>, file_id: &str) -> Result<(), Error> {
-    let tg_file_path = get_tg_file_path(&cx, file_id).await?;
+async fn resize_and_answer(bot: &Bot, msg: &Message, file_meta: &FileMeta) -> Result<(), Error> {
+    let tg_file_path = get_tg_file_path(bot, file_meta).await?;
     let tmp_file = create_tmp_file(PNG_EXTENSION)?;
     let tmp_file_path = tmp_file.path();
 
-    download_file(&cx, tmp_file_path, &tg_file_path).await?;
+    download_file(bot, tmp_file_path, &tg_file_path).await?;
 
     load_image(tmp_file_path)?
-        .resize(MAX_IMAGE_SIZE, MAX_IMAGE_SIZE, FilterType::Lanczos3)
+        .resize(MAX_IMAGE_SIZE, MAX_IMAGE_SIZE, FilterType::Triangle)
         .save_with_format(tmp_file_path, ImageFormat::Png)
         .map_err(Error::Image)?;
 
-    cx.answer_document(InputFile::file(tmp_file_path))
-        .send()
+    bot.send_document(msg.chat.id, InputFile::file(tmp_file_path))
         .await
-        .map_err(Error::Io)?
         .map_err(Error::TeloxideRequest)?;
 
     Ok(())
 }
 
-async fn get_tg_file_path(cx: &UpdateWithCx<Message>, file_id: &str) -> Result<String, Error> {
-    cx.bot
-        .get_file(file_id)
-        .send()
+async fn get_tg_file_path(bot: &Bot, file_meta: &FileMeta) -> Result<String, Error> {
+    bot.get_file(&file_meta.id)
         .await
-        .map(|file| file.file_path)
+        .map(|file| file.path)
         .map_err(Error::TeloxideRequest)
 }
 
@@ -122,11 +99,7 @@ fn create_tmp_file(extension: &str) -> Result<NamedTempFile, Error> {
         .map_err(Error::Io)
 }
 
-async fn download_file<P>(
-    cx: &UpdateWithCx<Message>,
-    tmp_file_path: P,
-    tg_file_path: &str,
-) -> Result<(), Error>
+async fn download_file<P>(bot: &Bot, tmp_file_path: P, tg_file_path: &str) -> Result<(), Error>
 where
     P: AsRef<Path>,
 {
@@ -138,8 +111,7 @@ where
         .await
         .map_err(Error::Io)?;
 
-    cx.bot
-        .download_file(&tg_file_path, &mut tokio_file)
+    bot.download_file(tg_file_path, &mut tokio_file)
         .await
         .map_err(Error::TeloxideDownload)
 }
